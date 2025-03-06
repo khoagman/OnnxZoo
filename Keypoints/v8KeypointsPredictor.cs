@@ -143,4 +143,8 @@ public class v8KeypointsPredictor : v8Predictor, IPredictor<Prediction> {
             return PostProcessing.Suppress(result, Overlap);
         }
     }
+
+    public new Prediction[] BatchPredict(List<Mat> images) {
+        throw new NotImplementedException();
+    }
 }

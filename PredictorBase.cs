@@ -56,6 +56,7 @@ abstract public class PredictorBase<TPrediction>: IPredictor<TPrediction> {
         sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
 
         sessionOptions.ExecutionMode = ExecutionMode.ORT_PARALLEL;
+        sessionOptions.LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_VERBOSE;
 
         return sessionOptions;
     }
@@ -173,9 +174,84 @@ abstract public class PredictorBase<TPrediction>: IPredictor<TPrediction> {
         return outputTensor;
     }
 
+    protected virtual DenseTensor<T> BatchInference<T>(List<Mat> images) where T : struct {
+        if (images == null || images.Count == 0)
+            throw new ArgumentException("Image list cannot be null or empty.");
+
+        int batchSize = images.Count;
+        Mat[] resizedImages = new Mat[batchSize];
+        List<float[]> floatArrays = new List<float[]>(batchSize);
+        
+        try {
+            for (int i = 0; i < batchSize; i++) {
+                Mat img = images[i];
+                if (img.Rows != InputHeight || img.Cols != InputWidth) {
+                    resizedImages[i] = Utils.Resize(img, InputWidth, InputHeight);
+                }
+                else {
+                    resizedImages[i] = img.Clone(); // Clone để tránh tham chiếu trực tiếp
+                }
+
+                // Kiểm tra kích thước sau resize
+                if (resizedImages[i].Rows != InputHeight || resizedImages[i].Cols != InputWidth)
+                    throw new Exception($"Ảnh {i} có kích thước sai sau resize.");
+
+                DenseTensor<float> float32Data = Utils.ExtractPixels(resizedImages[i]) as DenseTensor<float>;
+                if (float32Data == null)
+                    throw new Exception($"Failed to extract pixels for image {i}.");
+
+                floatArrays.Add(float32Data.Buffer.Span.ToArray());
+            }
+            // Tạo tensor batch
+            int totalPixels = InputHeight * InputWidth * 3;
+            float[] combinedFloatArray = new float[batchSize * totalPixels];
+            for (int i = 0; i < batchSize; i++) {
+                Array.Copy(floatArrays[i], 0, combinedFloatArray, i * totalPixels, totalPixels);
+            }
+            DenseTensor<T> tensor;
+            var tensorShape = new[] { batchSize, 3, InputHeight, InputWidth };
+
+            if (typeof(T) == typeof(Float16)) {
+                Float16[] float16Array = Array.ConvertAll(combinedFloatArray, f => (Float16)f);
+                tensor = new DenseTensor<T>(float16Array.Select(x => (T)(object)x).ToArray(), tensorShape);
+            }
+            else if (typeof(T) == typeof(float)) {
+                tensor = new DenseTensor<T>(combinedFloatArray.Select(x => (T)(object)x).ToArray(), tensorShape);
+            }
+            else {
+                throw new NotSupportedException("Chỉ hỗ trợ float hoặc Float16.");
+            }
+            // check tensor shape
+            var inputs = new List<NamedOnnxValue>
+            {
+            NamedOnnxValue.CreateFromTensor(InputCol, tensor)
+        };
+
+            Debug.WriteLine($"tensor: {tensor.Dimensions[0]}x{tensor.Dimensions[1]}x{tensor.Dimensions[2]}x{tensor.Dimensions[3]}");
+            using var results = _inferenceSession.Run(inputs);
+            var output = results.FirstOrDefault(x => modelOutputs.Contains(x.Name));
+
+            if (output?.Value is not DenseTensor<T> outputTensor)
+                throw new Exception("Inference output không hợp lệ.");
+
+            return outputTensor;
+        }
+        finally {
+            // Giải phóng bộ nhớ
+            foreach (var mat in resizedImages) {
+                if (mat != null && !mat.IsDisposed)
+                    mat.Dispose();
+            }
+        }
+    }
+
     public Label[] getLabels() => Labels;
 
     public virtual TPrediction[] Predict(Mat image) {
+        throw new NotImplementedException();
+    }
+
+    public virtual TPrediction[] BatchPredict(List<Mat> images) {
         throw new NotImplementedException();
     }
 }

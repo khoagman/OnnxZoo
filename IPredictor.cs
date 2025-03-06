@@ -14,4 +14,5 @@ public interface IPredictor<TPrediction>: IDisposable {
     Label[] getLabels();
 
     TPrediction[] Predict(Mat img);
+    TPrediction[] BatchPredict(List<Mat> images);
 }

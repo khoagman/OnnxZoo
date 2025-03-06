@@ -25,4 +25,14 @@ public class PostProcessing {
 
         return results;
     }
+
+    public static Prediction[] BatchHighest(Prediction[][] predictions) {
+        if (predictions.Length == 0) return Array.Empty<Prediction>();
+        var results = new List<Prediction>();
+        foreach (var prediction in predictions) {
+            var result = HighestOne(prediction);
+            results.AddRange(result);
+        }
+        return results.ToArray();
+    }
 }

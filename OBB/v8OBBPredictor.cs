@@ -176,4 +176,8 @@ public class v8OBBPredictor : PredictorBase<Prediction>, IPredictor<Prediction> 
             return PostProcessing.Suppress(result, Overlap);
         }
     }
+
+    override public Prediction[] BatchPredict(List<Mat> images) {
+        throw new NotImplementedException();
+    }
 }
