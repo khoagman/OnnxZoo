@@ -14,11 +14,12 @@ public class Effv2Predictor : PredictorBase<Prediction>, IPredictor<Prediction> 
     private Prediction[][] Pred_32(DenseTensor<float> tensor) {
         var resultLock = new object();
         var resultList = new List<Prediction[]>();
+
         for (int i = 0; i < tensor.Dimensions[0]; i++) {
             var result = new List<Prediction>();
             for (int j = 0; j < tensor.Dimensions[1]; j++) {
                 float confidence = tensor[0, j];
-                if (confidence < Confidence) continue;
+                //if (confidence < Confidence) continue;
                 var label = Labels[j];
                 result.Add(new Prediction {
                     Label = label,
@@ -47,12 +48,12 @@ public class Effv2Predictor : PredictorBase<Prediction>, IPredictor<Prediction> 
 
     override public Prediction[] Predict(Mat image) {
         if (isFP16) {
-            var output16 = Inference<Float16>(image);
+            var output16 = InferenceClass<Float16>(image);
             var result = Pred_16(output16, image);
             return PostProcessing.HighestOne(result);
         }
         else {
-            var output32 = Inference<float>(image);
+            var output32 = InferenceClass<float>(image);
             var result = Pred_32(output32);
             return PostProcessing.HighestOne(result[0]);
         }

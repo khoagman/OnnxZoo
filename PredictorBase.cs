@@ -16,7 +16,7 @@ abstract public class PredictorBase<TPrediction>: IPredictor<TPrediction> {
 
     public float Confidence { get; set; } = 0.5f;
     public float MulConfidence { get; set; } = 0.5f;
-    public float Overlap { get; set; } = 0.5f;
+    public float Overlap { get; set; } = 0.6f;
 
     public string? InputCol { get; protected set; }
     public string? OutputCol { get; protected set; }
@@ -123,6 +123,69 @@ abstract public class PredictorBase<TPrediction>: IPredictor<TPrediction> {
                 Id = x.i,
                 Name = x.s
             }).ToArray();
+    }
+
+    protected virtual DenseTensor<T> InferenceClass<T>(Mat img) where T : struct {
+        Mat resized = null;
+        if (img.Rows != InputHeight || img.Cols != InputWidth) {
+            resized = Utils.Resize(img, InputWidth, InputHeight);
+        }
+        else {
+            resized = img;
+        }
+
+        // Trích xuất pixel
+        DenseTensor<float> float32Data = Utils.ExtractPixels(resized) as DenseTensor<float>;
+        if (float32Data == null)
+            throw new Exception("Failed to extract pixels as DenseTensor<float>.");
+
+        // Lấy dữ liệu dưới dạng mảng
+        float[] floatArray = float32Data.Buffer.Span.ToArray();
+
+        //Chuẩn hóa về[0, 1] trước
+        //for (int i = 0; i < floatArray.Length; i++) {
+        //    floatArray[i] = floatArray[i] / 255.0f;
+        //}
+
+        //Áp dụng chuẩn hóa ImageNet
+        float[] means = new float[] { 0.485f, 0.456f, 0.406f };
+        float[] stds = new float[] { 0.229f, 0.224f, 0.225f };
+
+        for (int i = 0; i < floatArray.Length; i++) {
+            int channelIdx = i % 3;
+            floatArray[i] = (floatArray[i] - means[channelIdx]) / stds[channelIdx];
+        }
+
+        // Tạo tensor từ dữ liệu đã chuẩn hóa
+        DenseTensor<T> tensor;
+        if (typeof(T) == typeof(Float16)) {
+            Float16[] float16Array = Array.ConvertAll(floatArray, f => (Float16)f);
+            tensor = new DenseTensor<T>(float16Array as T[], new[] { 1, 3, resized.Rows, resized.Cols });
+        }
+        else if (typeof(T) == typeof(float)) {
+            tensor = new DenseTensor<T>(floatArray as T[], new[] { 1, 3, resized.Rows, resized.Cols });
+        }
+        else {
+            throw new NotSupportedException("Inference only supports float or BFloat16.");
+        }
+
+        if (tensor == null)
+            throw new Exception("Tensor creation failed. Ensure the data conversion is correct.");
+
+        var inputs = new List<NamedOnnxValue> {
+        NamedOnnxValue.CreateFromTensor(InputCol, tensor)
+    };
+
+        if (inputs == null)
+            throw new Exception("inputs creation failed. Ensure the data conversion is correct.");
+
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _inferenceSession.Run(inputs);
+        DisposableNamedOnnxValue output = results.FirstOrDefault(x => modelOutputs.Contains(x.Name));
+
+        if (output?.Value is not DenseTensor<T> outputTensor)
+            throw new Exception("Inference output is null or invalid.");
+
+        return outputTensor;
     }
 
     protected virtual DenseTensor<T> Inference<T>(Mat img) where T : struct {
