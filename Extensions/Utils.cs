@@ -63,6 +63,67 @@ public static class Utils {
         return float32Array.Select(f => (Half)f).ToArray();
     }
 
+    public static float[] ComputeHogFeatures(Mat image) {
+        Mat gray = new Mat();
+        //Cv2.CvtColor(image, gray, ColorConversionCodes.BGR2GRAY);
+        gray = image;
+
+        Mat dx = new Mat();
+        Mat dy = new Mat();
+        Cv2.Sobel(gray, dx, MatType.CV_32F, 1, 0, 3);
+        Cv2.Sobel(gray, dy, MatType.CV_32F, 0, 1, 3);
+
+        Mat magnitude = new Mat();
+        Mat orientation = new Mat();
+        Cv2.Magnitude(dx, dy, magnitude);
+        Cv2.Phase(dx, dy, orientation, angleInDegrees: true);
+
+        for (int y = 0; y < orientation.Rows; y++)
+            for (int x = 0; x < orientation.Cols; x++)
+                orientation.At<float>(y, x) = orientation.At<float>(y, x) % 180f;
+
+        int cellSize = 8;
+        int numBins = 9;
+        float binWidth = 180f / numBins;
+
+        int numCellsX = image.Cols / cellSize;
+        int numCellsY = image.Rows / cellSize;
+        int totalCells = numCellsX * numCellsY;
+
+        float[] featureVector = new float[totalCells * numBins];
+
+        int featureIndex = 0;
+        for (int cellY = 0; cellY < numCellsY; cellY++) {
+            for (int cellX = 0; cellX < numCellsX; cellX++) {
+                float[] hist = new float[numBins];
+
+                for (int y = cellY * cellSize; y < (cellY + 1) * cellSize; y++) {
+                    for (int x = cellX * cellSize; x < (cellX + 1) * cellSize; x++) {
+                        float mag = magnitude.At<float>(y, x);
+                        float ori = orientation.At<float>(y, x);
+
+                        float index = ori / binWidth;
+                        int left = (int)Math.Floor(index);
+                        float frac = index - left;
+
+                        if (left < numBins - 1) {
+                            hist[left] += (1 - frac) * mag;
+                            hist[left + 1] += frac * mag;
+                        }
+                        else {
+                            hist[numBins - 1] += mag;
+                        }
+                    }
+                }
+
+                for (int b = 0; b < numBins; b++)
+                    featureVector[featureIndex++] = hist[b];
+            }
+        }
+
+        return featureVector;
+    }
+
     public static float Clamp(float value, float min, float max) {
         return (value < min) ? min : (value > max) ? max : value;
     }

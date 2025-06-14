@@ -22,6 +22,7 @@ abstract public class PredictorBase<TPrediction>: IPredictor<TPrediction> {
     public string? OutputCol { get; protected set; }
     public int InputHeight { get; protected set; }
     public int InputWidth { get; protected set; }
+    public int VectorLength { get; protected set; }
     public int OutputDim { get; protected set; }
     public int NumClasses { get; protected set; }
     public bool UseDetect { get; set; }
@@ -123,6 +124,54 @@ abstract public class PredictorBase<TPrediction>: IPredictor<TPrediction> {
                 Id = x.i,
                 Name = x.s
             }).ToArray();
+    }
+
+    protected virtual DenseTensor<T> InferenceHOG<T>(Mat img) where T : struct {
+        Mat resized = null;
+        if (img.Rows != 64 || img.Cols != 32) {
+            resized = Utils.Resize(img, 32, 64);
+        }
+        else {
+            resized = img;
+        }
+
+        Mat gray = new Mat();
+        if (resized.Channels() == 3)
+            Cv2.CvtColor(resized, gray, ColorConversionCodes.BGR2GRAY);
+        else
+            gray = resized.Clone();
+
+        Cv2.Resize(gray, gray, new Size(32, 64));
+
+        Point[] locations = new Point[0];
+
+        //float[] floatArray = hog.Compute(gray, new Size(8, 8), new Size(0, 0), locations);
+        float[] floatArray =  Utils.ComputeHogFeatures(gray);
+
+        DenseTensor<T> tensor;
+        if (typeof(T) == typeof(Float16)) {
+            Float16[] float16Array = Array.ConvertAll(floatArray, f => (Float16)f);
+            tensor = new DenseTensor<T>(float16Array as T[], new[] { 1, VectorLength });
+        }
+        else if (typeof(T) == typeof(float)) {
+            tensor = new DenseTensor<T>(floatArray as T[], new[] { 1, VectorLength });
+        }
+        else {
+            throw new NotSupportedException("Inference only supports float or BFloat16.");
+        }
+        if (tensor == null)
+            throw new Exception("Tensor creation failed. Ensure the data conversion is correct.");
+        var inputs = new List<NamedOnnxValue> {
+            NamedOnnxValue.CreateFromTensor(InputCol, tensor)
+        };
+        if (inputs == null)
+            throw new Exception("inputs creation failed. Ensure the data conversion is correct.");
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _inferenceSession.Run(inputs);
+        Console.WriteLine($"Inference completed in {Stopwatch.ElapsedMilliseconds} ms");
+        var probabilitiesOutput = results.FirstOrDefault(x => x.Name == "probabilities");
+        if (probabilitiesOutput?.Value is not DenseTensor<T> outputTensor)
+            throw new Exception("Inference output is null or invalid.");
+        return outputTensor;
     }
 
     protected virtual DenseTensor<T> InferenceClass<T>(Mat img) where T : struct {
